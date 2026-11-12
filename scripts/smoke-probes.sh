@@ -29,9 +29,10 @@ _wg_session() { # jar 里备好核心会话和 wger 的登录态；已建立时�
   curl -sS --noproxy '*' --max-time 60 -o /dev/null -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
     --data-urlencode "token=${SMOKE_TOKEN:-}" "${SMOKE_BASE%/}/_wonton/login" ||
     { echo "主人令牌登录不了核心"; return 1; }
-  # 走进插件：网关带头 → wger 登录页自动登录 → 回跳；wger 的会话和 csrftoken 都落 jar
+  # 走进插件：入口是登录页（中间件只在那里按头登录）→ 自动登录回跳；
+  # wger 的会话和 csrftoken 都落 jar。API 拼接仍用 origin。
   curl -sS --noproxy '*' --max-time 120 -o /dev/null -L -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
-    -H 'Accept: text/html' "$(_wg_origin)/" ||
+    -H 'Accept: text/html' "${SMOKE_WEB_URL}" ||
     { echo "插件网页登录跳转失败"; return 1; }
 }
 
@@ -49,20 +50,22 @@ identity_check() { # 应用自己的“当前用户”接口认出的是用户�
     { echo "接口认出的不是 $SMOKE_OWNER：$(head -c 200 <<<"$out")"; return 1; }
 }
 
-data_write() { # 建一条训练日，comment 写随机标记，标记覆盖写进 $SMOKE_STATE
-  local marker out csrf
+data_write() { # 建一个训练计划，name 写随机标记，标记覆盖写进 $SMOKE_STATE
+  local marker out csrf today
   _wg_session || return 1
-  marker="wonton-smoke-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  # Routine.name 上限 25 字符：前缀加 12 位十六进制刚好 24
+  marker="wonton-$(head -c6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   # 浏览版 API 页面会带 CSRF 表单，Django 这时才发 csrftoken cookie；纯 JSON 请求不发
   out="$(curl -sS --noproxy '*' --max-time 120 -o /dev/null -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
     -H 'Accept: text/html' "$(_wg_origin)/api/v2/")" ||
     { echo "取 API 页面失败：$out"; return 1; }
   csrf="$(awk '$6=="csrftoken"{print $7}' "${SMOKE_JAR:-}" | tail -1)"
   [[ -n "$csrf" ]] || { echo "会话里没有 csrftoken"; return 1; }
+  today="$(date +%F)"
   out="$(curl -sS --noproxy '*' --max-time 120 --fail-with-body -b "${SMOKE_JAR:-}" -X POST \
     -H "X-CSRFToken: $csrf" -H "Referer: $(_wg_origin)/" -H 'Content-Type: application/json' \
-    --data-raw "{\"comment\":\"$marker\"}" "$(_wg_origin)/api/v2/workout/")" ||
-    { echo "POST /api/v2/workout/ 失败：$out"; return 1; }
+    --data-raw "{\"name\":\"$marker\",\"start\":\"$today\",\"end\":\"$today\"}" "$(_wg_origin)/api/v2/routine/")" ||
+    { echo "POST /api/v2/routine/ 失败：$out"; return 1; }
   grep -qF "$marker" <<<"$out" || { echo "写入没带回标记：$(head -c 200 <<<"$out")"; return 1; }
   printf '%s' "$marker" > "$SMOKE_STATE"
 }
@@ -73,8 +76,8 @@ data_check() { # 读回标记去应用里找
   [[ -n "$marker" ]] || { echo "SMOKE_STATE 是空的（data_write 没跑过？）"; return 1; }
   _wg_session || return 1
   out="$(curl -sS --noproxy '*' --max-time 120 --fail-with-body -b "${SMOKE_JAR:-}" \
-    "$(_wg_origin)/api/v2/workout/")" ||
-    { echo "GET /api/v2/workout/ 失败：$out"; return 1; }
+    "$(_wg_origin)/api/v2/routine/")" ||
+    { echo "GET /api/v2/routine/ 失败：$out"; return 1; }
   grep -qF "$marker" <<<"$out" ||
     { echo "没找到标记 $marker，看到的是：$(head -c 300 <<<"$out")"; return 1; }
 }
