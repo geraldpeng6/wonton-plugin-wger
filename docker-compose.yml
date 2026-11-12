@@ -361,18 +361,25 @@ x-wonton:
     zh: 第一个版本：训练计划、营养日记、体重记录，家人各一个账号，动作库和食物库从 wger.de 同步。
     en: "First release: workout plans, nutrition diary and weight tracking, one account per family member, exercise and food databases synced from wger.de."
   # 打开即用：代登录头认人，第一次打开自动建号，没有要用户做的一步。
-  # wger 的 AuthProxy 中间件只在登录页上按头登录（首页是公开落地页），
-  # 入口指向 /user/login：打开 → 自动登录 → 回到仪表盘。
+  # 入口指向登录页并带 next：代登录中间件登录后优先跳 next（同源才接受）。
+  # 不能直接写 path /user/login：登录后它按"当时激活的语言"反向解析（LocaleMiddleware
+  # 在代登录中间件之后才跑），会锁死英文。next 指到 /zh-hans/（认证后回中文仪表盘）。
+  # 界面默认中文靠注入的 Accept-Language，用户在应用里切换语言后 cookie 优先。
   webui:
     service: web
     port: 80
-    path: /user/login
+    path: /user/login?next=/zh-hans/
     sso: proxy
     proxy:
       headers:
         Remote-User: "{user}"
         Remote-Email: "{email}"
         Remote-Name: "{name}"
+        # 界面默认中文：wger 按标准 LocaleMiddleware 选语言（URL 前缀 > cookie >
+        # Accept-Language > LANGUAGE_CODE，后者写死 en 且无环境项可配）。给网页
+        # 请求注入 Accept-Language 让不懂英文的家人首开就是中文；用户在应用里
+        # 手动切换语言后 cookie 优先，不受影响。
+        Accept-Language: "zh-CN"
   # 动作库、食物库同步和条码查询要连 wger.de，经核心的出网代理
   permissions: [network.egress]
   # Django 的 SECRET_KEY（不设则每次重启随机，会话全失效）和内部服务的密码

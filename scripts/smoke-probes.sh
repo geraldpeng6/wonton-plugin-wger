@@ -24,16 +24,23 @@ _wg_origin() { # 网页入口可能带路径和查询（清单 webui.path），�
 _wg_session() { # jar 里备好核心会话和 wger 的登录态；已建立时开销是两次快速请求
   [[ -n "${SMOKE_WEB_URL:-}" && -n "${SMOKE_BASE:-}" ]] ||
     { echo "缺冒烟变量：需要 SMOKE_WEB_URL/SMOKE_BASE"; return 1; }
-  [[ -s "${SMOKE_JAR:-}" ]] && grep -q 'wonton' "$SMOKE_JAR" 2>/dev/null && return 0
   # 核心会话：-b 保留 jar 里已有 cookie（只写 -c 会把 jar 里别的域的会话抹掉）
-  curl -sS --noproxy '*' --max-time 60 -o /dev/null -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
-    --data-urlencode "token=${SMOKE_TOKEN:-}" "${SMOKE_BASE%/}/_wonton/login" ||
-    { echo "主人令牌登录不了核心"; return 1; }
-  # 走进插件：入口是登录页（中间件只在那里按头登录）→ 自动登录回跳；
-  # wger 的会话和 csrftoken 都落 jar。API 拼接仍用 origin。
-  curl -sS --noproxy '*' --max-time 120 -o /dev/null -L -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
-    -H 'Accept: text/html' "${SMOKE_WEB_URL}" ||
-    { echo "插件网页登录跳转失败"; return 1; }
+  if ! grep -q 'wonton' "${SMOKE_JAR:-/dev/null}" 2>/dev/null; then
+    curl -sS --noproxy '*' --max-time 60 -o /dev/null -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
+      --data-urlencode "token=${SMOKE_TOKEN:-}" "${SMOKE_BASE%/}/_wonton/login" ||
+      { echo "主人令牌登录不了核心"; return 1; }
+  fi
+  # 走进插件：wger 的代登录中间件只在登录页上按头登录（首页是公开落地页），
+  # 显式走登录页。冒烟合同可能给带路径的入口（dev.sh）也可能剥成 origin
+  #（e2e harness），两种都归一成 <origin>/user/login。
+  # wger 的会话和 csrftoken 都落 jar；API 拼接仍用 origin。
+  local entry="${SMOKE_WEB_URL%/}"
+  entry="${entry%/user/login}/user/login"
+  if ! grep -q 'sessionid' "${SMOKE_JAR:-/dev/null}" 2>/dev/null; then
+    curl -sS --noproxy '*' --max-time 120 -o /dev/null -L -b "${SMOKE_JAR:-}" -c "${SMOKE_JAR:-}" \
+      -H 'Accept: text/html' "$entry" ||
+      { echo "插件网页登录跳转失败（$entry）"; return 1; }
+  fi
 }
 
 web_assert() { # 已登录的页面：wger 自己的前端资源引用，别的应用不会有
