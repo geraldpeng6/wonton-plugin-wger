@@ -1,43 +1,28 @@
-# 云吞插件模板
+# 云吞插件：健身助手（wger）
 
-开发流程见[插件开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)。
+训练计划、营养日记和体重记录，装在云吞上的 [wger](https://wger.de)（AGPL-3.0，[官方 Docker 部署](https://github.com/wger-project/docker)）。插件开发流程见[开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md)。
 
-这是一个能安装的示例插件 `app.example.hello`：使用 nginx 官方镜像显示问候页，经网关的 `sso: proxy` 注入用户名，页面显示“你好，<用户名>”。示例没有应用账号、持久化数据或 MCP 工具。
+## 登录
 
-## 示例文件
+网页入口接云吞网关的代登录（`sso: proxy`）：打开就是已登录状态，第一次打开时 wger 自动按云吞用户名建号（`AUTH_PROXY_CREATE_UNKNOWN_USER`，身份头来自网关，信任地址只写核心地址）。上游预建的 `admin/{{固定密码}}` 账号在首次启动后被停用（一次性 init 服务），注册和游客号也已关闭，账号只能经代登录产生。
 
-| 路径 | 内容 |
-| --- | --- |
-| `docker-compose.yml` | 示例清单、nginx 服务和三个 `configs` |
-| `web/default.conf.template` | nginx 配置，启用 SSI 回显用户名并提供健康检查入口；只放行来自核心地址（`${WONTON_CORE_ADDRESS}`）的请求，其余来源 403 |
-| `web/index.html` | 问候页 |
-| `web/tokens.css` | 页面主题变量的后备值 |
-| `tabs/` | 示例主页的应用页面图标 |
-| `screenshots/home.png` | 商店详情页的示例截图 |
-| `scripts/smoke-probes.sh` | 检查真实页面和网关注入身份的插件探针 |
+## 数据
 
-从模板创建自己的插件后，替换示例清单、网页和素材；具体步骤见[写插件](https://github.com/wontonapp/wonton-docs/blob/main/develop.md#写插件)。
+数据都在 Docker 命名卷里：`postgres-data`（数据库）、`media`（同步下来的动作图和视频、上传的视频）、`static`、`redis-data`、`beat`（调度状态）。卸载时选择删除数据会一并删除；保留数据时重装沿用。
 
-## 对着别的栈跑探针
+## 出网
 
-`probes`、`api`、`session` 按 `.wonton/.env` 的 `WONTON_BASE_DOMAIN` 拼核心地址，`up` 起的栈自己写这个键。插件装进别人的栈、或者对着已有环境排查时，把那套栈的基础域名写进 `.wonton/.env`，不要只按实例名猜地址：实例名只是资源名前缀，网关按 Host 认域名，拼错了会回“没有安装”。
+动作库、食物库从 wger.de 同步（celery 每周后台跑，量大、首次要几个小时，不挡启动），条码扫到本地没有的食物时实时从 wger.de 取。这些都申请 `network.egress`，经核心的出网代理；不联网时应用照常可用，只是没有新内容和查不到新食物。
 
-```bash
-WONTON_BASE_DOMAIN=wonton.localhost
-```
+## 和家人名单的关系
 
-## 核心镜像
+家里每个人打开插件网页，就是自己的账号（按网关认出的用户建号），训练和饮食互不干扰；没有共享训练计划的说法，家人之间看不到彼此的数据。
 
-检查和冒烟默认用套件里的核心镜像（`ghcr.io/wontonapp/wonton-core:main`）；要固定别的核心镜像，在仓库 Settings → Variables 设 `WONTON_CORE_IMAGE`，手动触发“检查”时填的 `core-image` 输入优先。
+## 已知限制
 
-## 更新开发套件
-
-```bash
-scripts/dev.sh kit-update
-```
-
-在从模板新建的插件仓库中更新套件；本仓库是套件源头，执行时只提示并退出。版本、可选引用和自定义脚本约定见[开发指南](https://github.com/wontonapp/wonton-docs/blob/main/develop.md#更新开发套件)。
+- 手机 App（wger 官方 App）连不上本插件：它用 JWT 密钥认证，本插件没有配（Web 全功能可用）。powersync（App 离线同步）也不在部署里。
+- 动作库同步默认每周一次随机时间；想手动触发，在宿主上进 wger 的 web 容器跑 `python3 manage.py sync-exercises`（容器名以 `wonton-` 开头、以 `de-wger-workout--web` 结尾，用 `docker ps` 查）。
 
 ## 图标
 
-`icon.svg` 是本仓库原创线条图标，按本仓库 MIT 许可证分发，见 [NOTICE](NOTICE)。
+`icon.png` 用 wger 官方标志（放在上游用的白色底上），它是 wger 项目的商标，来源、许可和商标说明见 [NOTICE](NOTICE)。
